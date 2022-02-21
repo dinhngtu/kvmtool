@@ -2,6 +2,7 @@
 #define KVM__KVM_ARCH_H
 
 #include "kvm/interrupt.h"
+#include "asm/kvm.h"
 
 #include <stdbool.h>
 #include <linux/types.h>
@@ -33,10 +34,18 @@
 
 #define MAX_PAGE_SIZE		SZ_4K
 
+#define VIRTIO_DEFAULT_TRANS(kvm)	VIRTIO_PCI
+
+struct kvm_arch_bootstate {
+	struct kvm_sregs	sregs;
+	struct kvm_regs		regs;
+	struct kvm_fpu		fpu;
+	struct kvm_xcrs		xcrs;
+	struct kvm_msrs		*msrs;
+};
+
 struct kvm_arch {
-	u16			boot_selector;
-	u16			boot_ip;
-	u16			boot_sp;
+	struct kvm_arch_bootstate bootstate;
 
 	struct interrupt_table	interrupt_table;
 };
