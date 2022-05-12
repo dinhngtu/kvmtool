@@ -788,12 +788,14 @@ static void virtio_net__vhost_init(struct kvm *kvm, struct net_dev *ndev)
 
 	i = 0;
 	list_for_each_entry(bank, &kvm->mem_banks, list) {
-		mem->regions[i] = (struct vhost_memory_region) {
-			.guest_phys_addr = bank->guest_phys_addr,
-			.memory_size	 = bank->size,
-			.userspace_addr	 = (unsigned long)bank->host_addr,
-		};
-		i++;
+		if (bank->type == KVM_MEM_TYPE_RAM) {
+			mem->regions[i] = (struct vhost_memory_region) {
+				.guest_phys_addr = bank->guest_phys_addr,
+				.memory_size	 = bank->size,
+				.userspace_addr	 = (unsigned long)bank->host_addr,
+			};
+			i++;
+		}
 	}
 	mem->nregions = i;
 
