@@ -653,13 +653,14 @@ static void exit_vq(struct kvm *kvm, void *dev, u32 vq)
 		queue->gsi = queue->irqfd = 0;
 	}
 
-	/*
-	 * TODO: vhost reset owner. It's the only way to cleanly stop vhost, but
-	 * we can't restart it at the moment.
-	 */
 	if (ndev->vhost_fd && !is_ctrl_vq(ndev, vq)) {
-		pr_warning("Cannot reset VHOST queue");
-		ioctl(ndev->vhost_fd, VHOST_RESET_OWNER);
+		struct vhost_vring_file file = {
+			.index = vq,
+			.fd = -1,
+		};
+		if (ioctl(ndev->vhost_fd, VHOST_NET_SET_BACKEND, &file) < 0) {
+			die_perror("cannot reset vhost queue backend");
+		}
 		return;
 	}
 
