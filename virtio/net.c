@@ -381,12 +381,34 @@ static void virtio_net__tap_exit(struct net_dev *ndev)
 	close(sock);
 }
 
+static int virtio_net__tap_getmtu(struct net_dev *ndev)
+{
+	struct ifreq ifr;
+	int sockfd;
+
+	if (ioctl(ndev->tap_fd, TUNGETIFF, &ifr) < 0)
+		return -errno;
+
+	sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sockfd < 0)
+		return -errno;
+
+	if (ioctl(sockfd, SIOCGIFMTU, &ifr) < 0) {
+		close(sockfd);
+		return -errno;
+	}
+
+	close(sockfd);
+	return ifr.ifr_mtu;
+}
+
 static bool virtio_net__tap_create(struct net_dev *ndev)
 {
 	int offload;
 	struct ifreq ifr;
 	const struct virtio_net_params *params = ndev->params;
 	bool macvtap = (!!params->tapif) && (params->tapif[0] == '/');
+	int mtu;
 
 	/* Did the user already gave us the FD? */
 	if (params->fd)
@@ -410,6 +432,13 @@ static bool virtio_net__tap_create(struct net_dev *ndev)
 		pr_warning("Config tap device error. Are you root?");
 		goto fail;
 	}
+
+	mtu = virtio_net__tap_getmtu(ndev);
+	if (mtu < 0) {
+		pr_warning("Cannot get tap MTU");
+		goto fail;
+	}
+	ndev->config.mtu = mtu;
 
 	/*
 	 * The UFO support had been removed from kernel in commit:
@@ -490,25 +519,28 @@ static u32 get_host_features(struct kvm *kvm, void *dev)
 		r = ioctl(ndev->vhost_fd, VHOST_GET_FEATURES, &features);
 		if (r != 0)
 			die_perror("VHOST_GET_FEATURES failed");
+		features |= 1UL << VIRTIO_NET_F_MAC
+			| 1UL << VIRTIO_NET_F_MTU;
 	} else {
-	features = 1UL << VIRTIO_NET_F_MAC
-		| 1UL << VIRTIO_NET_F_CSUM
-		| 1UL << VIRTIO_NET_F_HOST_TSO4
-		| 1UL << VIRTIO_NET_F_HOST_TSO6
-		| 1UL << VIRTIO_NET_F_GUEST_TSO4
-		| 1UL << VIRTIO_NET_F_GUEST_TSO6
-		| 1UL << VIRTIO_RING_F_EVENT_IDX
-		| 1UL << VIRTIO_RING_F_INDIRECT_DESC
-		| 1UL << VIRTIO_NET_F_CTRL_VQ
-		| 1UL << VIRTIO_NET_F_MRG_RXBUF
-		| 1UL << (ndev->queue_pairs > 1 ? VIRTIO_NET_F_MQ : 0);
+		features = 1UL << VIRTIO_NET_F_MAC
+			| 1UL << VIRTIO_NET_F_MTU
+			| 1UL << VIRTIO_NET_F_CSUM
+			| 1UL << VIRTIO_NET_F_HOST_TSO4
+			| 1UL << VIRTIO_NET_F_HOST_TSO6
+			| 1UL << VIRTIO_NET_F_GUEST_TSO4
+			| 1UL << VIRTIO_NET_F_GUEST_TSO6
+			| 1UL << VIRTIO_RING_F_EVENT_IDX
+			| 1UL << VIRTIO_RING_F_INDIRECT_DESC
+			| 1UL << VIRTIO_NET_F_CTRL_VQ
+			| 1UL << VIRTIO_NET_F_MRG_RXBUF
+			| 1UL << (ndev->queue_pairs > 1 ? VIRTIO_NET_F_MQ : 0);
 
-	/*
-	 * The UFO feature for host and guest only can be enabled when the
-	 * kernel has TAP UFO support.
-	 */
-	if (ndev->tap_ufo)
-		features |= (1UL << VIRTIO_NET_F_HOST_UFO
+		/*
+		* The UFO feature for host and guest only can be enabled when the
+		* kernel has TAP UFO support.
+		*/
+		if (ndev->tap_ufo)
+			features |= (1UL << VIRTIO_NET_F_HOST_UFO
 				| 1UL << VIRTIO_NET_F_GUEST_UFO);
 	}
 
@@ -547,9 +579,9 @@ static void set_guest_features(struct kvm *kvm, void *dev, u32 features)
 			ndev->vdev.ops->signal_config(kvm, &ndev->vdev);
 		}
 	} else {
-	conf->status = virtio_host_to_guest_u16(&ndev->vdev, conf->status);
-	conf->max_virtqueue_pairs = virtio_host_to_guest_u16(&ndev->vdev,
-							     conf->max_virtqueue_pairs);
+		conf->status = virtio_host_to_guest_u16(&ndev->vdev, conf->status);
+		conf->max_virtqueue_pairs = virtio_host_to_guest_u16(&ndev->vdev,
+								conf->max_virtqueue_pairs);
 	}
 }
 
