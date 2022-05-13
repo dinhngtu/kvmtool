@@ -489,9 +489,15 @@ static size_t get_config_size(struct kvm *kvm, void *dev)
 
 static u32 get_host_features(struct kvm *kvm, void *dev)
 {
-	u32 features;
+	u64 features;
 	struct net_dev *ndev = dev;
+	int r;
 
+	if (ndev->vhost_fd) {
+		r = ioctl(ndev->vhost_fd, VHOST_GET_FEATURES, &features);
+		if (r != 0)
+			die_perror("VHOST_GET_FEATURES failed");
+	} else {
 	features = 1UL << VIRTIO_NET_F_MAC
 		| 1UL << VIRTIO_NET_F_CSUM
 		| 1UL << VIRTIO_NET_F_HOST_TSO4
@@ -511,8 +517,9 @@ static u32 get_host_features(struct kvm *kvm, void *dev)
 	if (ndev->tap_ufo)
 		features |= (1UL << VIRTIO_NET_F_HOST_UFO
 				| 1UL << VIRTIO_NET_F_GUEST_UFO);
+	}
 
-	return features;
+	return (u32)(features & 0xffffffff);
 }
 
 static int virtio_net__vhost_set_features(struct net_dev *ndev)
@@ -535,12 +542,22 @@ static void set_guest_features(struct kvm *kvm, void *dev, u32 features)
 {
 	struct net_dev *ndev = dev;
 	struct virtio_net_config *conf = &ndev->config;
+	u64 vhost_features;
+	int r;
 
 	ndev->features = features;
-
+	if (ndev->vhost_fd) {
+		vhost_features = features;
+		r = ioctl(ndev->vhost_fd, VHOST_SET_FEATURES, &vhost_features);
+		if (r != 0) {
+			ndev->vdev.status |= VIRTIO_CONFIG_S_NEEDS_RESET;
+			ndev->vdev.ops->signal_config(kvm, &ndev->vdev);
+		}
+	} else {
 	conf->status = virtio_host_to_guest_u16(&ndev->vdev, conf->status);
 	conf->max_virtqueue_pairs = virtio_host_to_guest_u16(&ndev->vdev,
 							     conf->max_virtqueue_pairs);
+	}
 }
 
 static void virtio_net_start(struct net_dev *ndev)
