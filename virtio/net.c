@@ -30,6 +30,12 @@
 #define VIRTIO_NET_QUEUE_SIZE		256
 #define VIRTIO_NET_NUM_QUEUES		8
 
+#define VIRTIO_NET_CTRL_GUEST_OFFLOADS_MASK ((1 << VIRTIO_NET_F_GUEST_CSUM) | \
+					     (1 << VIRTIO_NET_F_GUEST_TSO4) | \
+					     (1 << VIRTIO_NET_F_GUEST_TSO6) | \
+					     (1 << VIRTIO_NET_F_GUEST_ECN) | \
+					     (1 << VIRTIO_NET_F_GUEST_UFO))
+
 struct net_dev;
 
 struct net_dev_operations {
@@ -73,6 +79,9 @@ struct net_dev {
 
 static LIST_HEAD(ndevs);
 static int compat_id = -1;
+
+static u32 get_host_features(struct kvm *kvm, void *dev);
+static void set_guest_features(struct kvm *kvm, void *dev, u32 features);
 
 #define MAX_PACKET_SIZE 65550
 
@@ -218,6 +227,24 @@ static virtio_net_ctrl_ack virtio_net_handle_mq(struct kvm* kvm, struct net_dev 
 	return VIRTIO_NET_OK;
 }
 
+static virtio_net_ctrl_ack virtio_net_handle_guest_offload(struct kvm* kvm, struct net_dev *ndev, struct virtio_net_ctrl_hdr *ctrl, void *data)
+{
+	u64 features;
+	u64 wanted_offloads;
+
+	features = get_host_features(kvm, ndev);
+
+	switch (ctrl->cmd) {
+	case VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET:
+		wanted_offloads = le64toh(*(__le64 *)data);
+		features = (features & ~VIRTIO_NET_CTRL_GUEST_OFFLOADS_MASK) | (wanted_offloads & VIRTIO_NET_CTRL_GUEST_OFFLOADS_MASK);
+		set_guest_features(kvm, ndev, features);
+		return VIRTIO_NET_OK;
+	default:
+		return VIRTIO_NET_ERR;
+	}
+}
+
 static void *virtio_net_ctrl_thread(void *p)
 {
 	struct iovec iov[VIRTIO_NET_QUEUE_SIZE];
@@ -228,6 +255,7 @@ static void *virtio_net_ctrl_thread(void *p)
 	struct kvm *kvm = ndev->kvm;
 	struct virtio_net_ctrl_hdr *ctrl;
 	virtio_net_ctrl_ack *ack;
+	void *data;
 
 	kvm__set_thread_name("virtio-net-ctrl");
 
@@ -240,11 +268,15 @@ static void *virtio_net_ctrl_thread(void *p)
 		while (virt_queue__available(vq)) {
 			head = virt_queue__get_iov(vq, iov, &out, &in, kvm);
 			ctrl = iov[0].iov_base;
+			data = iov[in].iov_base;
 			ack = iov[out].iov_base;
 
 			switch (ctrl->class) {
 			case VIRTIO_NET_CTRL_MQ:
 				*ack = virtio_net_handle_mq(kvm, ndev, ctrl);
+				break;
+			case VIRTIO_NET_CTRL_GUEST_OFFLOADS:
+				*ack = virtio_net_handle_guest_offload(kvm, ndev, ctrl, data);
 				break;
 			default:
 				*ack = VIRTIO_NET_ERR;
