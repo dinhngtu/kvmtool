@@ -220,7 +220,7 @@ static inline void virtio_init_device_vq(struct virtio_device *vdev,
 					 struct virt_queue *vq)
 {
 	vq->endian = vdev->endian;
-	vq->use_event_idx = (vdev->features & VIRTIO_RING_F_EVENT_IDX);
+	vq->use_event_idx = (vdev->features & (1 << VIRTIO_RING_F_EVENT_IDX));
 	vq->enabled = true;
 }
 
