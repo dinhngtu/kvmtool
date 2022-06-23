@@ -376,12 +376,34 @@ static void virtio_net__tap_exit(struct net_dev *ndev)
 	close(sock);
 }
 
+static int virtio_net__tap_getmtu(struct net_dev *ndev)
+{
+	struct ifreq ifr;
+	int sockfd;
+
+	if (ioctl(ndev->tap_fd, TUNGETIFF, &ifr) < 0)
+		return -errno;
+
+	sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sockfd < 0)
+		return -errno;
+
+	if (ioctl(sockfd, SIOCGIFMTU, &ifr) < 0) {
+		close(sockfd);
+		return -errno;
+	}
+
+	close(sockfd);
+	return ifr.ifr_mtu;
+}
+
 static bool virtio_net__tap_create(struct net_dev *ndev)
 {
 	int offload;
 	struct ifreq ifr;
 	const struct virtio_net_params *params = ndev->params;
 	bool macvtap = (!!params->tapif) && (params->tapif[0] == '/');
+	int mtu;
 
 	/* Did the user already gave us the FD? */
 	if (params->fd)
@@ -405,6 +427,13 @@ static bool virtio_net__tap_create(struct net_dev *ndev)
 		pr_warning("Config tap device error. Are you root?");
 		goto fail;
 	}
+
+	mtu = virtio_net__tap_getmtu(ndev);
+	if (mtu < 0) {
+		pr_warning("Cannot get tap MTU");
+		goto fail;
+	}
+	ndev->config.mtu = mtu;
 
 	/*
 	 * The UFO support had been removed from kernel in commit:
@@ -499,6 +528,9 @@ static u64 get_host_features(struct kvm *kvm, void *dev)
 		| 1UL << VIRTIO_NET_F_MRG_RXBUF
 		| 1UL << (ndev->queue_pairs > 1 ? VIRTIO_NET_F_MQ : 0)
 		| 1UL << VIRTIO_F_ANY_LAYOUT;
+
+	if (ndev->mode == NET_MODE_TAP)
+		features |= 1UL << VIRTIO_NET_F_MTU;
 
 	/*
 	 * The UFO feature for host and guest only can be enabled when the
