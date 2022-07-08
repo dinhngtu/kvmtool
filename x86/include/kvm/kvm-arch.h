@@ -35,8 +35,6 @@
 
 #define MAX_PAGE_SIZE		SZ_4K
 
-#define VIRTIO_DEFAULT_TRANS(kvm)	VIRTIO_PCI
-
 struct kvm_arch_bootstate {
 	struct kvm_sregs	sregs;
 	struct kvm_regs		regs;
